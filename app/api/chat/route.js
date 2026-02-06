@@ -166,20 +166,39 @@ When the message includes a [TOOL:xxx] prefix, tailor your response:
 export const runtime = 'edge';
 
 export async function POST(request) {
+  let body;
   try {
-    const { messages, apiKey, tool } = await request.json();
+    body = await request.json();
+  } catch {
+    return Response.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+  }
 
-    if (!apiKey) {
-      return Response.json({ error: 'API key is required' }, { status: 400 });
+  const { messages, apiKey, tool } = body;
+
+  // --- Input validation ---
+  if (!apiKey || typeof apiKey !== 'string') {
+    return Response.json({ error: 'API key is required' }, { status: 400 });
+  }
+
+  if (!apiKey.startsWith('sk-ant-')) {
+    return Response.json({ error: 'Invalid API key format. It should start with sk-ant-' }, { status: 400 });
+  }
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return Response.json({ error: 'Messages array is required and must not be empty' }, { status: 400 });
+  }
+
+  // Validate each message has role and content
+  for (const msg of messages) {
+    if (!msg.role || !msg.content) {
+      return Response.json({ error: 'Each message must have a role and content' }, { status: 400 });
     }
+  }
 
-    if (!apiKey.startsWith('sk-ant-')) {
-      return Response.json({ error: 'Invalid API key format' }, { status: 400 });
-    }
-
+  try {
     const client = new Anthropic({ apiKey });
 
-    // Prepend tool context if specified
+    // Prepend tool context to the last user message if specified
     const processedMessages = messages.map((msg, i) => {
       if (i === messages.length - 1 && msg.role === 'user' && tool) {
         return { ...msg, content: `[TOOL:${tool}] ${msg.content}` };
@@ -201,32 +220,63 @@ export async function POST(request) {
       messages: processedMessages
     });
 
-    // Extract text content from response
+    // Extract all text content blocks from the response
     let textContent = '';
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        textContent += block.text;
+    if (response.content && Array.isArray(response.content)) {
+      for (const block of response.content) {
+        if (block.type === 'text') {
+          textContent += block.text;
+        }
       }
+    }
+
+    // If no text was extracted (e.g. only tool_use blocks returned), return a fallback
+    if (!textContent) {
+      textContent = "I'm processing that request. Could you try asking again?";
     }
 
     return Response.json({
       content: textContent,
-      usage: response.usage
+      usage: response.usage || null
     });
 
   } catch (error) {
     console.error('API Error:', error);
 
-    if (error.status === 401) {
-      return Response.json({ error: 'Invalid API key. Please check your key and try again.' }, { status: 401 });
+    // Structured error responses for known Anthropic API error codes
+    const status = error.status || error.statusCode || 500;
+
+    if (status === 401) {
+      return Response.json(
+        { error: 'Invalid API key. Please check your key at console.anthropic.com and try again.' },
+        { status: 401 }
+      );
     }
 
-    if (error.status === 429) {
-      return Response.json({ error: 'Rate limit exceeded. Please wait a moment and try again.' }, { status: 429 });
+    if (status === 403) {
+      return Response.json(
+        { error: 'Access denied. Your API key may not have permission for this model or feature.' },
+        { status: 403 }
+      );
     }
 
-    return Response.json({
-      error: error.message || 'Something went wrong. Please try again.'
-    }, { status: 500 });
+    if (status === 429) {
+      return Response.json(
+        { error: 'Rate limit exceeded. Please wait a moment and try again.' },
+        { status: 429 }
+      );
+    }
+
+    if (status === 529 || status === 503) {
+      return Response.json(
+        { error: 'Anthropic API is temporarily overloaded. Please try again in a few seconds.' },
+        { status: 503 }
+      );
+    }
+
+    return Response.json(
+      { error: error.message || 'Something went wrong. Please try again.' },
+      { status: 500 }
+    );
   }
 }

@@ -196,10 +196,10 @@ export default function Home() {
     html = html.replace(/```([\s\S]*?)```/g, '<pre style="background:rgba(0,0,0,0.4);padding:12px 16px;border-radius:8px;overflow-x:auto;font-size:13px;margin:8px 0;white-space:pre-wrap;word-break:break-word;">$1</pre>');
     // Inline code
     html = html.replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9em;">$1</code>');
-    // Bold
+    // Bold (must run before italic)
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    // Italic
-    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    // Italic - only match single * not preceded/followed by another *
+    html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
     // Line breaks
     html = html.replace(/\n/g, '<br/>');
     return html;
@@ -242,7 +242,6 @@ export default function Home() {
       {/* Global Styles */}
       <style dangerouslySetInnerHTML={{ __html: `
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
         @keyframes pulse {
           0%, 100% { opacity: 0.4; transform: translateY(0); }
           50% { opacity: 1; transform: translateY(-4px); }
